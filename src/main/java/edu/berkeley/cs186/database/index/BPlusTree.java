@@ -143,11 +143,11 @@ public class BPlusTree {
     public Optional<RecordId> get(DataBox key) {
         typecheck(key);
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
 
         // TODO(proj2): implement
 
-        return Optional.empty();
+        return root.get(key).getKey(key);
     }
 
     /**
@@ -160,7 +160,7 @@ public class BPlusTree {
     public Iterator<RecordId> scanEqual(DataBox key) {
         typecheck(key);
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
 
         Optional<RecordId> rid = get(key);
         if (rid.isPresent()) {
@@ -199,11 +199,12 @@ public class BPlusTree {
      */
     public Iterator<RecordId> scanAll() {
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
 
         // TODO(proj2): Return a BPlusTreeIterator.
 
-        return Collections.emptyIterator();
+
+        return new BPlusTreeIterator();
     }
 
     /**
@@ -232,11 +233,11 @@ public class BPlusTree {
     public Iterator<RecordId> scanGreaterEqual(DataBox key) {
         typecheck(key);
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
 
         // TODO(proj2): Return a BPlusTreeIterator.
 
-        return Collections.emptyIterator();
+        return new BPlusTreeIterator(key);
     }
 
     /**
@@ -251,14 +252,22 @@ public class BPlusTree {
     public void put(DataBox key, RecordId rid) {
         typecheck(key);
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.X);
 
         // TODO(proj2): implement
         // Note: You should NOT update the root variable directly.
         // Use the provided updateRoot() helper method to change
         // the tree's root if the old root splits.
-
-        return;
+        Optional<Pair<DataBox, Long>> cur_node = root.put(key, rid);
+        if (cur_node.isPresent()) {
+            List<DataBox> keys = new ArrayList<>();
+            List<Long> children = new ArrayList<>();
+            keys.add(cur_node.get().getFirst());
+            children.add(root.getPage().getPageNum());
+            children.add(cur_node.get().getSecond());
+            InnerNode newRoot = new InnerNode(metadata, bufferManager, keys, children, lockContext);
+            updateRoot(newRoot);
+        }
     }
 
     /**
@@ -280,14 +289,28 @@ public class BPlusTree {
      */
     public void bulkLoad(Iterator<Pair<DataBox, RecordId>> data, float fillFactor) {
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.X);
 
         // TODO(proj2): implement
         // Note: You should NOT update the root variable directly.
         // Use the provided updateRoot() helper method to change
         // the tree's root if the old root splits.
+        if (!toSexp().equals("()")) {
+            throw new BPlusTreeException("No Empty Tree for Bulk Loading!");
+        }
 
-        return;
+        while(data.hasNext()) {
+            Optional<Pair<DataBox, Long>> cur_node = root.bulkLoad(data, fillFactor);
+            if (cur_node.isPresent()) {
+                List<DataBox> keys = new ArrayList<>();
+                List<Long> children = new ArrayList<>();
+                keys.add(cur_node.get().getFirst());
+                children.add(root.getPage().getPageNum());
+                children.add(cur_node.get().getSecond());
+                InnerNode newRoot = new InnerNode(metadata, bufferManager, keys, children, lockContext);
+                updateRoot(newRoot);
+            }
+        }
     }
 
     /**
@@ -304,11 +327,11 @@ public class BPlusTree {
     public void remove(DataBox key) {
         typecheck(key);
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.X);
 
         // TODO(proj2): implement
 
-        return;
+        root.remove(key);
     }
 
     // Helpers /////////////////////////////////////////////////////////////////
@@ -318,7 +341,7 @@ public class BPlusTree {
      */
     public String toSexp() {
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
         return root.toSexp();
     }
 
@@ -336,7 +359,7 @@ public class BPlusTree {
      */
     public String toDot() {
         // TODO(proj4_integration): Update the following line
-        LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
+        LockUtil.ensureSufficientLockHeld(lockContext, LockType.S);
 
         List<String> strings = new ArrayList<>();
         strings.add("digraph g {" );
@@ -421,10 +444,32 @@ public class BPlusTree {
     // Iterator ////////////////////////////////////////////////////////////////
     private class BPlusTreeIterator implements Iterator<RecordId> {
         // TODO(proj2): Add whatever fields and constructors you want here.
+        private LeafNode curNode;
+        private Iterator<RecordId> ridItr;
+
+        public BPlusTreeIterator() {
+            curNode = root.getLeftmostLeaf();
+            ridItr = curNode.scanAll();
+        }
+
+        public BPlusTreeIterator(DataBox key) {
+            curNode = root.get(key);
+            ridItr = curNode.scanGreaterEqual(key);
+        }
+
 
         @Override
         public boolean hasNext() {
             // TODO(proj2): implement
+            if (ridItr == null) return false;
+            if (ridItr.hasNext()) return true;
+
+            Optional<LeafNode> rightSibling = curNode.getRightSibling();
+            if (rightSibling.isPresent()) {
+                curNode = rightSibling.get();
+                ridItr = curNode.scanAll();
+                if (ridItr.hasNext()) return true;
+            }
 
             return false;
         }
@@ -432,8 +477,11 @@ public class BPlusTree {
         @Override
         public RecordId next() {
             // TODO(proj2): implement
-
-            throw new NoSuchElementException();
+            if (ridItr.hasNext()) {
+                return ridItr.next();
+            } else{
+                throw new NoSuchElementException();
+            }
         }
     }
 }

@@ -109,8 +109,8 @@ public class TestBPlusTree {
         long finalIOs = bufferManager.getNumIOs();
         maxIOs = xs.size() / (2 * metadata.getOrder());
         assertTrue("too few I/Os used overall (" + (finalIOs - initialIOs) + " < " + maxIOs +
-                   ") - are you materializing before the iterator is even constructed?",
-                   (finalIOs - initialIOs) >= maxIOs);
+                  ") - are you materializing before the iterator is even constructed?",
+                  (finalIOs - initialIOs) >= maxIOs);
         return xs;
     }
 
@@ -439,6 +439,7 @@ public class TestBPlusTree {
                 for (int i = 0; i < keys.size(); ++i) {
                     tree.put(keys.get(i), rids.get(i));
                 }
+
 
                 // Test get.
                 for (int i = 0; i < keys.size(); ++i) {
